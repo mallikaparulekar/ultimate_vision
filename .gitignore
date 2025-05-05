@@ -1,2 +1,3 @@
 data/vids/*.mp4
 data/frames/**/*.jpg
+.DS_Store
