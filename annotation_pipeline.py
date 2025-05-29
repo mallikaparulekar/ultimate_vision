@@ -5,45 +5,90 @@ import argparse
 import numpy as np
 from tqdm import tqdm
 
+def collect_all_folders(frames_dir):
+    folder_paths = []
+    for root, dirs, files in os.walk(frames_dir):
+        for dir in dirs:
+            folder_paths.append(os.path.join(root, dir))
+    return sorted(folder_paths)
+
+def load_annotated_frames(csv_path):
+    if not os.path.exists(csv_path):
+        return set()
+    with open(csv_path, 'r') as f:
+        reader = csv.reader(f)
+        next(reader, None)  # Skip header
+        return {row[0] for row in reader}
+
 
 def manual_annotate(frames_dir, output_dir, csv_path):
-    os.makedirs(output_dir, exist_ok=True)
+    #os.makedirs(output_dir, exist_ok=True)
     rows = []
+    print(csv_path)
+    annotated = load_annotated_frames(csv_path)
 
-    for fname in sorted(os.listdir(frames_dir)):
-        img_path = os.path.join(frames_dir, fname)
-        img = cv2.imread(img_path)
-        if img is None:
-            continue
-        clone = img.copy()
+    write_header = not os.path.exists(csv_path)
 
-        coords = []
-        def on_click(event, x, y, flags, param):
-            if event == cv2.EVENT_LBUTTONDOWN:
-                coords.append((x, y))
-                cv2.circle(clone, (x, y), 5, (0, 0, 255), -1)
-                cv2.imshow("Frame", clone)
-
-        cv2.namedWindow("Frame")
-        cv2.setMouseCallback("Frame", on_click)
-        cv2.imshow("Frame", clone)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
-
-        if not coords:
-            raise RuntimeError(f"No click recorded for frame {fname}")
-        x, y = coords[0]
-        cv2.circle(img, (x, y), 5, (0, 0, 255), -1)
-
-        out_path = os.path.join(output_dir, fname)
-        cv2.imwrite(out_path, img)
-        rows.append([fname, x, y])
-
-    with open(csv_path, 'w', newline='') as f:
+    with open(csv_path, 'a', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(['frame', 'x_center', 'y_center'])
-        writer.writerows(rows)
-    print(f"Manual annotation complete. Results saved to {csv_path}")
+        if write_header:
+            writer.writerow(['frame', 'x_center', 'y_center'])
+
+        folders = collect_all_folders(frames_dir)
+        for frames in folders:
+            for fname in sorted(os.listdir(frames)):
+                if frames+fname in annotated:
+                    continue
+                img_path = os.path.join(frames, fname)
+                img = cv2.imread(img_path)
+                if img is None:
+                    continue
+                clone = img.copy()
+
+                coords = []
+                clicked = [False]
+                skipped = [False]
+
+                def on_click(event, x, y, flags, param):
+                    if event == cv2.EVENT_LBUTTONDOWN:
+                        coords.append((x, y))
+                        cv2.circle(clone, (x, y), 5, (0, 0, 255), -1)
+                        cv2.imshow("Frame", clone)
+                        clicked[0] = True
+                        cv2.destroyWindow("Frame")
+
+                cv2.namedWindow("Frame")
+                cv2.setMouseCallback("Frame", on_click)
+                while not clicked[0]:
+                    cv2.imshow("Frame", clone)
+                    key = cv2.waitKey(20) & 0xFF
+                    if key == 27:  # ESC key
+                        skipped[0] = True
+                        break
+                cv2.destroyAllWindows()
+
+                if skipped[0]:
+                    print(f"Skipped: {fname}")
+                    continue
+
+                if not coords:
+                    print(f"No click recorded for {fname}, skipping.")
+                    continue
+
+                x, y = coords[0]
+                writer.writerow([frames+fname, x, y])
+                print(f"Annotated: {frames+fname} at ({x}, {y})")
+                # Save image
+                #cv2.circle(img, (x, y), 5, (0, 0, 255), -1)
+                # out_path = os.path.join(output_dir, fname)
+                # cv2.imwrite(out_path, img)
+        #         rows.append([fname, x, y])
+        # write_header = not os.path.exists(csv_path)
+        # with open(csv_path, 'w', newline='') as f:
+        #     writer = csv.writer(f)
+        #     writer.writerow(['frame', 'x_center', 'y_center'])
+        #     writer.writerows(rows)
+        # print(f"Manual annotation complete. Results saved to {csv_path}")
 
 
 def detect_center(frame, prev_center=None, dp=1.2, minDist=30, param1=50, param2=30, minR=5, maxR=30):
@@ -151,17 +196,17 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Annotate frisbee centers in frames: manual or automatic (tracker/detector)."
     )
-    parser.add_argument("--frames_dir", required=True,
+    parser.add_argument("--frames_dir", required=False, default=r".\data\frames\Double_Game_Point_Carleton_vs._Stanford_Women's.mp4",
                         help="Directory containing extracted video frames.")
-    parser.add_argument("--mode", choices=["manual","auto"], default="auto",
+    parser.add_argument("--mode", choices=["manual","auto"], default="manual",
                         help="Annotation mode: manual clicking or automatic.")
     parser.add_argument("--tracker", choices=["csrt","kcf","mosse"], default="csrt",
                         help="Tracker type for automatic mode.")
     parser.add_argument("--method", choices=["tracker","detector"], default="tracker",
                         help="Auto annotation method: tracker or detector.")
-    parser.add_argument("--output_dir", required=True,
+    parser.add_argument("--output_dir", required=False,
                         help="Directory to save annotated frames.")
-    parser.add_argument("--csv", required=True,
+    parser.add_argument("--csv", required=False, default=r".\data\centered_frames\Double_Game_Point_Carleton_vs._Stanford_Women's.mp4\centered.csv",
                         help="Path to save CSV of centers.")
     args = parser.parse_args()
 
