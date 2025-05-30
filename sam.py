@@ -255,13 +255,21 @@ def load_image(image_str: str) -> Image.Image:
 
     return image
 
-def get_boxes(results: DetectionResult) -> List[List[List[float]]]:
+def get_boxes_and_probabilities(results: DetectionResult) -> List[List[List[float]]]:
     boxes = []
     for result in results:
         xyxy = result.box.xyxy
         boxes.append(xyxy)
+    
+    probs= []
+    for result in results:
+        prob = result.score
+        probs.append(prob)
+        
+        
+        
 
-    return [boxes]
+    return [boxes], probs
 
 def refine_masks(masks: torch.BoolTensor, polygon_refinement: bool = False) -> List[np.ndarray]:
     masks = masks.cpu().float()
@@ -316,8 +324,9 @@ def segment(
     segmentator = SamModel.from_pretrained(segmenter_id).to(device)
     processor = SamProcessor.from_pretrained(segmenter_id)
 
-    boxes = get_boxes(detection_results)
+    boxes, probabilities = get_boxes_and_probabilities(detection_results)
     print("boxes: ", boxes)
+    print("probabilities: ", probabilities)
     inputs = processor(images=image, input_boxes=boxes, return_tensors="pt").to(device)
 
     outputs = segmentator(**inputs)
@@ -346,7 +355,7 @@ def grounded_segmentation(
         image = load_image(image)
 
     detections = detect(image, labels, threshold, detector_id)
-    boxes = get_boxes(detections)
+    boxes, _ = get_boxes_and_probabilities(detections)
     if len(boxes[0]) == 0:
       print("No frisbees detected!")
       return np.array("image"), None
