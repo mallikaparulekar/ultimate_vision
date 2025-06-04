@@ -256,6 +256,8 @@ def load_image(image_str: str) -> Image.Image:
     return image
 
 def get_boxes_and_probabilities(results: DetectionResult) -> List[List[List[float]]]:
+    if results is None or len(results) == 0:
+        return [], []
     boxes = []
     for result in results:
         xyxy = result.box.xyxy
@@ -356,7 +358,7 @@ def grounded_segmentation(
 
     detections = detect(image, labels, threshold, detector_id)
     boxes, _ = get_boxes_and_probabilities(detections)
-    if len(boxes[0]) == 0:
+    if len(boxes) == 0:
       print("No frisbees detected!")
       return np.array("image"), None
 

@@ -8,6 +8,9 @@ import matplotlib.pyplot as plt
 from sam import *
 from PIL import Image
 import os
+import torch
+from resnet import CoordResNet18
+from torchvision import transforms
 
 frisbee_coordinates = None
 
@@ -66,7 +69,7 @@ def find_center_bounding_box(bounding_box):
 def run_sam(image):
     image_array, detections = grounded_segmentation(
     image=image,
-    labels=["a frisbee."],
+    labels=["a frisbee"],
     threshold=0.3,
     polygon_refinement=True, 
     detector_id = "IDEA-Research/grounding-dino-tiny", 
@@ -76,6 +79,8 @@ def run_sam(image):
     plot_detections(image_array, detections)
     # currently assuming only one bounding box. if run into case with multiple bounding boxes, choose most likely one.
     boxes, probabilities = get_boxes_and_probabilities(detections)
+    if len(boxes)== 0:
+        return None
     box = boxes[0][0]  # First [0] gets rid of extra wrapping bracket
     return find_center_bounding_box(box)
 
@@ -85,7 +90,6 @@ def run_autoregresive_sam_baseline(pass_folder, crop_size):
 
     num_frames_in_pass = len(os.listdir(pass_folder))
 
-    # Keep showing new frames until user clicks to set initial frisbee coordinates
     for i in range(num_frames_in_pass):
         image_path = f"{pass_folder}/frame_{i:05d}.jpg"
         image_rgb = load_image_and_convert_rgb(image_path)
@@ -103,7 +107,7 @@ def run_autoregresive_sam_baseline(pass_folder, crop_size):
     else:
         raise RuntimeError("No frisbee location selected after iterating through all frames.")
 
-    # Now track the frisbee in all subsequent frames
+    # Now track the frisbee in all subsequent frames 
     for j in range(i + 1, num_frames_in_pass):
         image_path = f"{pass_folder}/frame_{j:05d}.jpg"
         image_rgb = load_image_and_convert_rgb(image_path)
@@ -118,6 +122,10 @@ def run_autoregresive_sam_baseline(pass_folder, crop_size):
         cropped_image_PIL = Image.fromarray(cropped_image)
         center_in_crop = run_sam(cropped_image_PIL)
 
+        if (center_in_crop is None):
+            print(f"Frame {j:05d} — no frisbee detected, skipping to next frame, assume occlusion or terrible angle")
+            continue
+
         # Map to original image coordinates
         center_in_original = (
             int(center_in_crop[0] + crop_x_min),
@@ -125,62 +133,97 @@ def run_autoregresive_sam_baseline(pass_folder, crop_size):
         )
         frisbee_coordinates = center_in_original
         print(f"Frame {j:05d} — updated frisbee coordinates: {frisbee_coordinates}")
-    # global frisbee_coordinates
-
-    # num_frames_in_pass = len(os.listdir(pass_folder))
-    # # Load image path
-    # image_path = f"{pass_folder}/frame_00000.jpg"
-    # image_rgb = load_image_and_convert_rgb(image_path)
-
-    # # Set up the figure and click event
-    # fig = plt.figure()
-    # fig.canvas.mpl_connect('button_press_event', on_click)
-    # plt.imshow(image_rgb)
-    # plt.axis('off')
-    # plt.show()
-    # print(f"Initial frisbee coordinates: {frisbee_coordinates}")
-
-    # for i in range(1, num_frames_in_pass):
-    #     image_path = f"{pass_folder}/frame_{i:05d}.jpg"
-    #     image_rgb = load_image_and_convert_rgb(image_path)
-    #     cropped_image = crop_image(image_rgb, crop_size, frisbee_coordinates)
-
-    #     # display cropped image
-    #     plt.imshow(cropped_image)
-    #     plt.title(f"Frame {i:05d}")
-    #     plt.show()
 
 
-    #     cropped_image_PIL = Image.fromarray(cropped_image)
-    #     center_in_crop = run_sam(cropped_image_PIL)
-
-    #     # Map to original image coordinates
-    #     crop_x_min = frisbee_coordinates[0] - crop_size // 2
-    #     crop_y_min = frisbee_coordinates[1] - crop_size // 2
-    #     center_in_original = (
-    #         int(center_in_crop[0] + crop_x_min),
-    #         int(center_in_crop[1] + crop_y_min)
-    #     )
-    #     frisbee_coordinates = center_in_original
-    #     print("frisbee_coordinates:", frisbee_coordinates)
-
-    #     # plot that point on next_image_path:
-    #     # just for sanity check
-    #     # plt.imshow(image_rgb)
-    #     # plt.scatter(*center_in_original, color='red', s=10, label='SAM Center')
-    #     # plt.show()
 
 
+def run_autoregresive_sam_with_resnet(pass_folder, crop_size):
+
+     # load model from .pth
+    print("Loading model...")
+    model = CoordResNet18().to(device='cpu')
+    model.load_state_dict(torch.load("data/best_coordresnet18.pth", map_location='cpu'))
+    model.eval()
+    print("Model loaded successfully.")
+  
+
+    global frisbee_coordinates
+
+    num_frames_in_pass = len(os.listdir(pass_folder))
+
+    for i in range(num_frames_in_pass):
+        image_path = f"{pass_folder}/frame_{i:05d}.jpg"
+        image_rgb = load_image_and_convert_rgb(image_path)
+
+        fig = plt.figure()
+        fig.canvas.mpl_connect('button_press_event', on_click)
+        plt.imshow(image_rgb)
+        plt.title(f"Click to select frisbee - Frame {i:05d}")
+        plt.axis('off')
+        plt.show()
+
+        if frisbee_coordinates is not None:
+            print(f"Initial frisbee coordinates set from frame {i:05d}: {frisbee_coordinates}")
+            break
+    else:
+        raise RuntimeError("No frisbee location selected after iterating through all frames.")
+
+    # Now track the frisbee in all subsequent frames 
+    for j in range(i + 1, num_frames_in_pass):
+        image_path = f"{pass_folder}/frame_{j:05d}.jpg"
+        image_rgb = load_image_and_convert_rgb(image_path)
+        cropped_image, (crop_x_min, crop_y_min) = crop_image(image_rgb, crop_size, frisbee_coordinates)
+
+       
+        model.eval()
+        # Convert cropped image to tensor
+        cropped_image_tensor = transforms.ToTensor()(cropped_image).unsqueeze(0)
+        # Forward pass through the model
+        with torch.no_grad():
+            localized_output = model(cropped_image_tensor).cpu().numpy() * crop_size
+        
+        # RECROP to 80 by 80 around localized_output
+        recropped_image, (recrop_x_min, recrop_y_min) = crop_image(cropped_image, 80,  (int(localized_output[0][0]), int(localized_output[0][1])))
+
+
+        # Optional display
+        # plt.imshow(cropped_image)
+        # plt.title(f"Cropped input to SAM - Frame {j:05d}")
+        # plt.axis('off')
+        # plt.show()
+
+        recropped_image_PIL = Image.fromarray(recropped_image)
+        center_in_crop = run_sam(recropped_image_PIL)
+
+        if (center_in_crop is None):
+            print(f"Frame {j:05d} — no frisbee detected, skipping to next frame, assume occlusion or terrible angle")
+            continue
+
+        # undo the recrop
+        center_in_crop = (
+            center_in_crop[0] + recrop_x_min,
+            center_in_crop[1] + recrop_y_min
+        )
+
+        # Map to original image coordinates
+        center_in_original = (
+            int(center_in_crop[0] + crop_x_min),
+            int(center_in_crop[1] + crop_y_min)
+        )
+        frisbee_coordinates = center_in_original
+        print(f"Frame {j:05d} — updated frisbee coordinates: {frisbee_coordinates}")
+
+
+
+  
 
         
 
 
 if __name__ == "__main__":
     frisbee_coordinates = None
-    pass_folder = "data/frames/Double_Game_Point_Carleton_vs._Stanford_Women's.mp4/1:38_1:39/"
-    run_autoregresive_sam_baseline(pass_folder, crop_size=500)   
-
-
+    pass_folder = "data/frames/Double_Game_Point_Carleton_vs._Stanford_Women's.mp4/1:44_1:50/"
+    run_autoregresive_sam_with_resnet(pass_folder, crop_size=250)   
 
 
 # notes: failure cases:
