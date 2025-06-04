@@ -1,6 +1,6 @@
 
 
-frames_path = "data/frames/Double_Game_Point_Carleton_vs._Stanford_Women's.mp4/0:15_0:17"
+frames_path = "data/frames/Double_Game_Point_Carleton_vs._Stanford_Women's.mp4/0_15_0_17"
 
 import cv2
 import numpy as np
