@@ -60,12 +60,23 @@ def load_image_and_convert_rgb(path):
     image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     return image_rgb
 
+# def find_center_bounding_box(bounding_box):
+#     print(f"Bounding box: {bounding_box}")
+#     # example bounding box: [[119, 240, 144, 251]]
+#     x_min, y_min, x_max, y_max = bounding_box
+#     x_center = (x_min + x_max) / 2
+#     y_center = (y_min + y_max) / 2
+#     return [x_center, y_center]
+
 def find_center_bounding_box(bounding_box):
-    # example bounding box: [[119, 240, 144, 251]]
-    x_min, y_min, x_max, y_max = bounding_box
+    """Find the center (x, y) of a bounding box."""
+    x_min = bounding_box.xmin
+    y_min = bounding_box.ymin
+    x_max = bounding_box.xmax
+    y_max = bounding_box.ymax
     x_center = (x_min + x_max) / 2
     y_center = (y_min + y_max) / 2
-    return [x_center, y_center]
+    return (x_center, y_center)
 
     
 
@@ -121,9 +132,9 @@ def run_sam(image: Image.Image, viz: bool = True):
         print("No detections found.")
         return None, None
 
-    if viz:
-        print("Visualizing detections...")
-        plot_detections(image_array, detections)
+    # if viz:
+    #     print("Visualizing detections...")
+    #     plot_detections(image_array, detections)
 
     # Assume first detection is the most confident
     detection = detections[0]
@@ -237,13 +248,13 @@ def run_autogressive_sam_resnet_step(pass_folder, crop_size, j, model, display=T
         if localized_output.shape[0] == 0:
             print(f"Frame {j:05d} — model produced no output, skipping")
             return None, None
-        if display:
-            plt.imshow(cropped_image)
-            plt.scatter(localized_output[0][0], localized_output[0][1], color='red', label='Localized Output')
-            plt.title(f"Localized Output - Frame {j:05d}")
-            plt.axis('off')
-            plt.legend(loc='upper right')
-            plt.show()
+        # if display:
+        #     plt.imshow(cropped_image)
+        #     plt.scatter(localized_output[0][0], localized_output[0][1], color='red', label='Localized Output')
+        #     plt.title(f"Localized Output - Frame {j:05d}")
+        #     plt.axis('off')
+        #     plt.legend(loc='upper right')
+        #     plt.show()
 
     recrop_size_map = {250: 80, 500: 150, 750: 230}
     if crop_size not in recrop_size_map:
@@ -385,8 +396,8 @@ def run_eval(root_dir, labels_csv, crop_size, method, grounded=False, display=Fa
         if method == "autogressive_sam_resnet":
             model = CoordResNet18().to(device="cuda" if torch.cuda.is_available() else "cpu")
             if (crop_size == 250):
-                # model.load_state_dict(torch.load("data/best_coordresnet18_crop_250.pth", map_location="cuda" if torch.cuda.is_available() else "cpu"))
-                model.load_state_dict(torch.load("/content/drive/MyDrive/cs231n/projects/data/best_coordresnet18_crop_250.pth", map_location="cuda" if torch.cuda.is_available() else "cpu"))
+                model.load_state_dict(torch.load("data/best_coordresnet18_crop_250.pth", map_location="cuda" if torch.cuda.is_available() else "cpu"))
+                # model.load_state_dict(torch.load("/content/drive/MyDrive/cs231n/projects/data/best_coordresnet18_crop_250.pth", map_location="cuda" if torch.cuda.is_available() else "cpu"))
             elif( crop_size == 500):
                 model.load_state_dict(torch.load("data/best_coordresnet18_crop_500.pth", map_location="cuda" if torch.cuda.is_available() else "cpu"))
                 # model.load_state_dict(torch.load("/content/drive/MyDrive/cs231n/projects/data/best_coordresnet18_crop_500.pth",  map_location="cuda" if torch.cuda.is_available() else "cpu"))
@@ -398,7 +409,35 @@ def run_eval(root_dir, labels_csv, crop_size, method, grounded=False, display=Fa
             if method == "autogressive_sam_baseline":
                 center_coordinates = run_autogressive_sam_baseline_step(pass_folder, crop_size, j, display=display)
             elif method == "autogressive_sam_resnet":
-                center_coordinates = run_autogressive_sam_resnet_step(pass_folder, crop_size, j, model, display=display)
+                center_coordinates, mask = run_autogressive_sam_resnet_step(pass_folder, crop_size, j, model, display=display)
+                if display:
+                    if center_coordinates is not None:
+                        print("HERE")
+                        # display the mask on the image
+                        image_path = os.path.join(pass_folder, f"frame_{j:05d}.jpg")
+                        image_rgb = load_image_and_convert_rgb(image_path)
+                        plt.imshow(image_rgb)
+                        plt.imshow(mask, alpha=0.5, cmap='jet')  # Overlay mask with transparency
+                        plt.title(f"Mask Overlay - Frame {j:05d}")
+                        plt.axis('off')
+                        pass_folder_name = os.path.basename(pass_folder)
+                        os.makedirs(f"data/gif/{pass_folder_name}", exist_ok=True)
+                        plt.savefig(f"data/gif/{pass_folder_name}/frame_{j:05d}.png", bbox_inches='tight', pad_inches=0, dpi=100)
+                        #also save the original image
+                        plt.imsave(f"data/gif/{pass_folder_name}/original_frame_{j:05d}.png", image_rgb)
+                    else:
+                        # visualize just the image part
+                        image_path = os.path.join(pass_folder, f"frame_{j:05d}.jpg")
+                        image_rgb = load_image_and_convert_rgb(image_path)
+                        plt.imshow(image_rgb)
+                        plt.title(f"No Mask Detected - Frame {j:05d}")
+                        plt.axis('off')
+                        
+                        pass_folder_name = os.path.basename(pass_folder)
+                        os.makedirs(f"data/gif/{pass_folder_name}", exist_ok=True)
+                        plt.savefig(f"data/gif/{pass_folder_name}/frame_{j:05d}.png", bbox_inches='tight', pad_inches=0, dpi=100)
+                        plt.imsave(f"data/gif/{pass_folder_name}/original_frame_{j:05d}.png", image_rgb)
+                    
             if center_coordinates is None:
                 if not grounded:
                     print(f"Frame {j:05d} — no frisbee detected, skipping to next frame, assume occlusion or terrible angle")
@@ -408,7 +447,36 @@ def run_eval(root_dir, labels_csv, crop_size, method, grounded=False, display=Fa
                     print(f"Frame {j:05d} — no frisbee detected in crop, running SAM on full image.")
                     image_path = os.path.join(pass_folder, f"frame_{j:05d}.jpg")
                     image_rgb = load_image_and_convert_rgb(image_path)
-                    center_coordinates = run_sam(Image.fromarray(image_rgb), viz=display)     
+                    center_coordinates, mask = run_sam(Image.fromarray(image_rgb), viz=display)
+                    if display:
+                        if center_coordinates is not None:
+                            # display the mask on the image
+                            image_path = os.path.join(pass_folder, f"frame_{j:05d}.jpg")
+                            image_rgb = load_image_and_convert_rgb(image_path)
+                            plt.imshow(image_rgb)
+                            plt.imshow(mask, alpha=0.5, cmap='jet')  # Overlay mask with transparency
+                            plt.title(f"Mask Overlay - Frame {j:05d}")
+                            plt.axis('off')
+                            # find the pass name
+                            pass_folder_name = os.path.basename(pass_folder)
+                            os.makedirs(f"data/gif/{pass_folder_name}", exist_ok=True)
+                            plt.savefig(f"data/gif/{pass_folder_name}/frame_{j:05d}.png", bbox_inches='tight', pad_inches=0, dpi=100)
+                            plt.imsave(f"data/gif/{pass_folder_name}/original_frame_{j:05d}.png", image_rgb)
+                           
+        
+                        else:
+                            # visualize just the image part
+                            image_path = os.path.join(pass_folder, f"frame_{j:05d}.jpg")
+                            image_rgb = load_image_and_convert_rgb(image_path)
+                            pass_folder_name = os.path.basename(pass_folder)
+                            # make a directory for the pass if it doesn't exist\
+                            os.makedirs(f"data/gif/{pass_folder_name}", exist_ok=True)
+                            plt.imshow(image_rgb)
+                            plt.title(f"No Mask Detected - Frame {j:05d}")
+                            plt.axis('off')
+                            plt.savefig(f"data/gif/{pass_folder_name}/frame_{j:05d}.png", bbox_inches='tight', pad_inches=0, dpi=100)
+                            plt.imsave(f"data/gif/{pass_folder_name}/original_frame_{j:05d}.png", image_rgb)
+
                     if center_coordinates is None:    
                         print(f"Frame {j:05d} — no frisbee detected in full image, skipping to next frame.")
                         continue
@@ -425,6 +493,10 @@ def run_eval(root_dir, labels_csv, crop_size, method, grounded=False, display=Fa
             x_label, y_label = get_label_for_frame(frame_path, labels_csv)
             print(f"Frame {j:05d} — label coordinates: ({x_label}, {y_label})")
             print(f"Frame {j:05d} — detected coordinates: {frisbee_coordinates}")
+
+            print("frisbee_coordinates:", frisbee_coordinates)
+
+
 
             if abs(frisbee_coordinates[0] - x_label) <= EVAL_DISTANCE_ERROR and abs(frisbee_coordinates[1] - y_label) <= EVAL_DISTANCE_ERROR:
                 correct += 1
