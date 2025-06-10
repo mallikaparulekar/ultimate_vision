@@ -69,29 +69,77 @@ def find_center_bounding_box(bounding_box):
 
     
 
-def run_sam(image, viz=True):
-    if (image.height == 0 or image.width == 0):
-        print("Image has zero height or zero width, skipping SAM processing.")
-        return None
-    image_array, detections = grounded_segmentation(
-    image=image,
-    labels=["a frisbee"],
-    threshold=0.3,
-    polygon_refinement=True, 
-    detector_id = "IDEA-Research/grounding-dino-tiny", 
-    segmenter_id = "facebook/sam-vit-base"
-    )
+# def run_sam(image, viz=True):
+#     if (image.height == 0 or image.width == 0):
+#         print("Image has zero height or zero width, skipping SAM processing.")
+#         return None
+#     image_array, detections = grounded_segmentation(
+#     image=image,
+#     labels=["a frisbee"],
+#     threshold=0.3,
+#     polygon_refinement=True, 
+#     detector_id = "IDEA-Research/grounding-dino-tiny", 
+#     segmenter_id = "facebook/sam-vit-base"
+#     )
     
+#     if viz:
+#         print("Visualizing detections...")
+#         plot_detections(image_array, detections)
+#     # currently assuming only one bounding box. if run into case with multiple bounding boxes, choose most likely one.
+#     boxes, probabilities = get_boxes_and_probabilities(detections)
+#     if len(boxes)== 0:
+#         return None
+#     box = boxes[0][0]  # First [0] gets rid of extra wrapping bracket
+#     return find_center_bounding_box(box)
+
+def run_sam(image: Image.Image, viz: bool = True):
+    """
+    Run grounded segmentation (GroundingDINO + SAM) on a given image.
+
+    Args:
+        image (PIL.Image): The input image to segment.
+        viz (bool): Whether to visualize the detections.
+
+    Returns:
+        center (tuple or None): Center of the detected bounding box (x, y).
+        mask (np.ndarray or None): Segmentation mask (same size as input image).
+    """
+    if image.height == 0 or image.width == 0:
+        print("Image has zero height or zero width, skipping SAM processing.")
+        return None, None
+
+    image_array, detections = grounded_segmentation(
+        image=image,
+        labels=["a frisbee"],
+        threshold=0.3,
+        polygon_refinement=True, 
+        detector_id="IDEA-Research/grounding-dino-tiny", 
+        segmenter_id="facebook/sam-vit-base"
+    )
+
+    if detections is None or len(detections) == 0:
+        print("No detections found.")
+        return None, None
+
     if viz:
         print("Visualizing detections...")
         plot_detections(image_array, detections)
-    # currently assuming only one bounding box. if run into case with multiple bounding boxes, choose most likely one.
-    boxes, probabilities = get_boxes_and_probabilities(detections)
-    if len(boxes)== 0:
-        return None
-    box = boxes[0][0]  # First [0] gets rid of extra wrapping bracket
-    return find_center_bounding_box(box)
 
+    # Assume first detection is the most confident
+    detection = detections[0]
+    
+    # Extract bounding box and mask
+    box = detection.box
+    mask = detection.mask
+
+    if mask is None:
+        print("Detection found but mask is missing.")
+        return None, None
+
+    # Find center of bounding box
+    center = find_center_bounding_box(box)
+
+    return center, mask
 
 def run_autogressive_sam_baseline_step(pass_folder, crop_size, j, display=True):
     image_path = f"{pass_folder}/frame_{j:05d}.jpg"
@@ -118,63 +166,135 @@ def run_autogressive_sam_baseline_step(pass_folder, crop_size, j, display=True):
     )
     return center_in_original
     
+# def run_autogressive_sam_resnet_step(pass_folder, crop_size, j, model, display=True):
+#     image_path = f"{pass_folder}/frame_{j:05d}.jpg"
+#     image_rgb = load_image_and_convert_rgb(image_path)
+#     cropped_image, (crop_x_min, crop_y_min) = crop_image(image_rgb, crop_size, frisbee_coordinates)
+
+#     model.eval()
+#     # Convert cropped image to tensor
+#     # check if cuda aavailable
+#     if torch.cuda.is_available():
+#         device = 'cuda'
+#     else:
+#         device = 'cpu'
+#     cropped_image_tensor = transforms.ToTensor()(cropped_image).unsqueeze(0).to(device)
+#     # Forward pass through the model
+#     with torch.no_grad():
+#         localized_output = model(cropped_image_tensor).cpu().numpy() * crop_size
+#         print(f"Localized output for frame {j:05d}: {localized_output[0]}")
+#         if display:
+#             # plot this on cropped image
+#             plt.imshow(cropped_image)
+#             plt.scatter(localized_output[0][0], localized_output[0][1], color='red', label='Localized Output')
+#             plt.title(f"Localized Output - Frame {j:05d}")
+#             plt.axis('off')
+#             plt.legend()
+#             plt.show()
+    
+#     # RECROP to 80 by 80 around localized_output
+#     if crop_size == 250:
+#         recrop_size = 80
+#     elif crop_size == 500:
+#         recrop_size = 150
+#     elif crop_size == 750:
+#         recrop_size = 230
+#     recropped_image, (recrop_x_min, recrop_y_min) = crop_image(cropped_image, recrop_size,  (int(localized_output[0][0]), int(localized_output[0][1])))
+
+#     recropped_image_PIL = Image.fromarray(recropped_image)
+#     center_in_crop = run_sam(recropped_image_PIL, viz=display)
+
+#     if (center_in_crop is None):
+#         print(f"Frame {j:05d} — no frisbee detected, skipping to next frame, assume occlusion or terrible angle")
+#         return None
+
+#     # undo the recrop
+#     center_in_crop = (
+#         center_in_crop[0] + recrop_x_min,
+#         center_in_crop[1] + recrop_y_min
+#     )
+
+#     # Map to original image coordinates
+#     center_in_original = (
+#         int(center_in_crop[0] + crop_x_min),
+#         int(center_in_crop[1] + crop_y_min)
+#     )
+
+#     return center_in_original
+
 def run_autogressive_sam_resnet_step(pass_folder, crop_size, j, model, display=True):
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
     image_path = f"{pass_folder}/frame_{j:05d}.jpg"
-    image_rgb = load_image_and_convert_rgb(image_path)
+    image_rgb = load_image_and_convert_rgb(image_path)  # original full image
     cropped_image, (crop_x_min, crop_y_min) = crop_image(image_rgb, crop_size, frisbee_coordinates)
 
     model.eval()
-    # Convert cropped image to tensor
-    # check if cuda aavailable
-    if torch.cuda.is_available():
-        device = 'cuda'
-    else:
-        device = 'cpu'
     cropped_image_tensor = transforms.ToTensor()(cropped_image).unsqueeze(0).to(device)
-    # Forward pass through the model
+
     with torch.no_grad():
         localized_output = model(cropped_image_tensor).cpu().numpy() * crop_size
-        print(f"Localized output for frame {j:05d}: {localized_output[0]}")
+        if localized_output.shape[0] == 0:
+            print(f"Frame {j:05d} — model produced no output, skipping")
+            return None, None
         if display:
-            # plot this on cropped image
             plt.imshow(cropped_image)
             plt.scatter(localized_output[0][0], localized_output[0][1], color='red', label='Localized Output')
             plt.title(f"Localized Output - Frame {j:05d}")
             plt.axis('off')
-            plt.legend()
+            plt.legend(loc='upper right')
             plt.show()
-    
-    # RECROP to 80 by 80 around localized_output
-    if crop_size == 250:
-        recrop_size = 80
-    elif crop_size == 500:
-        recrop_size = 150
-    elif crop_size == 750:
-        recrop_size = 230
-    recropped_image, (recrop_x_min, recrop_y_min) = crop_image(cropped_image, recrop_size,  (int(localized_output[0][0]), int(localized_output[0][1])))
 
+    recrop_size_map = {250: 80, 500: 150, 750: 230}
+    if crop_size not in recrop_size_map:
+        raise ValueError(f"Unexpected crop_size: {crop_size}")
+    recrop_size = recrop_size_map[crop_size]
+
+    recropped_image, (recrop_x_min, recrop_y_min) = crop_image(
+        cropped_image, recrop_size, (int(localized_output[0][0]), int(localized_output[0][1]))
+    )
     recropped_image_PIL = Image.fromarray(recropped_image)
-    center_in_crop = run_sam(recropped_image_PIL, viz=display)
 
-    if (center_in_crop is None):
+    center_in_crop, mask_in_recrop = run_sam(recropped_image_PIL, viz=display)
+    if center_in_crop is None or mask_in_recrop is None:
         print(f"Frame {j:05d} — no frisbee detected, skipping to next frame, assume occlusion or terrible angle")
-        return None
+        return None, None
 
-    # undo the recrop
+    # Step 1: shift mask back into original cropped image
+    h_cropped, w_cropped = cropped_image.shape[:2]
+    h_original, w_original = image_rgb.shape[:2]
+
+    full_cropped_mask = np.zeros((h_cropped, w_cropped), dtype=np.uint8)
+
+    mask_h, mask_w = mask_in_recrop.shape
+    x_start = recrop_x_min
+    y_start = recrop_y_min
+    x_end = recrop_x_min + mask_w
+    y_end = recrop_y_min + mask_h
+
+    full_cropped_mask[y_start:y_end, x_start:x_end] = mask_in_recrop
+
+    # Step 2: shift full cropped mask back into original full image
+    full_original_mask = np.zeros((h_original, w_original), dtype=np.uint8)
+
+    x_start_orig = crop_x_min
+    y_start_orig = crop_y_min
+    x_end_orig = crop_x_min + w_cropped
+    y_end_orig = crop_y_min + h_cropped
+
+    full_original_mask[y_start_orig:y_end_orig, x_start_orig:x_end_orig] = full_cropped_mask
+
+    # Map center back too
     center_in_crop = (
         center_in_crop[0] + recrop_x_min,
         center_in_crop[1] + recrop_y_min
     )
-
-    # Map to original image coordinates
     center_in_original = (
-        int(center_in_crop[0] + crop_x_min),
-        int(center_in_crop[1] + crop_y_min)
+        int(round(center_in_crop[0] + crop_x_min)),
+        int(round(center_in_crop[1] + crop_y_min))
     )
 
-    return center_in_original
-
-
+    return center_in_original, full_original_mask
 
 def run_autoregresive_sam_baseline(pass_folder, crop_size):
 
