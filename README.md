@@ -1,4 +1,5 @@
 
-GIF of results using tracking methods:
+**GIF of Results Using Autoregressive Tracking with ResNet-Guided Cropping**
+
 ![Demo](data/9wrmb5.gif)
 
